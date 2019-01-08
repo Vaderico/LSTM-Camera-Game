@@ -1,6 +1,8 @@
 import argparse
 import os
 
+from train_manager import TrainManager
+
 # Ensures the training data directory extists, and deletes its contents
 def check_training_directory(directory):
     directory = directory.strip('/') + '/'
