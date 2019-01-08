@@ -3,22 +3,26 @@ with contextlib.redirect_stdout(None):
     import pygame
 from pygame.locals import *
 import os
+import shutil
 import json
 import random
 import datetime
 import time
+import csv
 
 from human_player import HumanPlayer
 from lstm_player import LSTMPlayer
  
-# Game that displays a crop of an images, and allows a player to move
+# Game that displays a crop of an image, and allows a player to move
 # around it by supplying velocities in the x and y direction
 class Game: 
-    def __init__(self, player, images_dir, res):
+    def __init__(self, player, images_dir, res, frame_rate):
         # Player that supplies x and y velocitites
         self._player = player 
         # Directory of all images used in the game
         self._images_dir = images_dir
+        # Frame rate of game
+        self._frame_rate = frame_rate
         # width and height resolution that image frame gets stretched out to for display
         self._res = res
         # Boolean to end game loop
@@ -47,8 +51,10 @@ class Game:
         # Height of _full_image
         self._full_height = 0
 
+        # Time of start recording, used for the filenames
+        self._time = ""
         # Width and height of frame that is cropped from _full_image to be displayed
-        self._frame_size = 30
+        self._frame_size = 224
         # Cropped image of _full_image
         self._small_frame = None
         # Frame that gets displayed - _small_frame expanded to the dimensions of _res
@@ -192,9 +198,10 @@ class Game:
             # Increment frame clock
             dt = clock.tick()
             time_since_action += dt
+            # print(1000 / self._frame_rate)
 
             # If 50 ms has passed, compute/render frame
-            if time_since_action >= 50:
+            if time_since_action >= (1000 / self._frame_rate):
                 time_since_action = 0
                 self.on_loop()
                 self.on_render()
@@ -206,14 +213,19 @@ class Game:
 # around it by supplying velocities in the x and y direction. Allows user
 # to record frames as training data, and shows statistics of recorded frames.
 class RecordGame(Game):
-    def __init__(self, player, images_dir, training_dir, res):
+    def __init__(self, player, images_dir, training_dir, res, frame_rate, stop, max_frames):
         # Call parent constructor
-        Game.__init__(self, player, images_dir, res)
+        Game.__init__(self, player, images_dir, res, frame_rate)
+        # Allows recordings to be stopped manually with spacebar
+        self._stop_recording = stop
         # Saves path of directory to save training data to 
         self._training_dir = training_dir
+        # Name of directory to save temporary images to
+        self._temp_dir = self._training_dir + "temp/"
+        self._max_frames = max_frames
+
         # Text in the top window bar
         self._caption = "LSTM Camera Game Recorder"
-
         # Font style for text display
         self._font_style = "roboto"
         # Height of control panel underneath frame cropping
@@ -239,7 +251,7 @@ class RecordGame(Game):
         # Time passed for the current sequence recording in milliseconds
         self._record_time = 0
         # Paths of each saved image .jpg and velocities .json files for the current sequence
-        self._output_filenames = []
+        self._recorded_velocities = []
 
         # Number of sequences saved for the current image at _img_index
         self._curr_img_seq_count = []
@@ -255,7 +267,7 @@ class RecordGame(Game):
         # Total number of frames for all sequences saved for all images in _all_images
         self._tot_frames = 0
 
-        # Training data meta object to be loaded to json file
+        # Stores data about all objects recorded so far
         self._training_meta_data = {}
             
     # Initialises pygame and other dependant variables
@@ -287,8 +299,14 @@ class RecordGame(Game):
         self._curr_img_time = [0] * num_train
         self._curr_img_frames = [0] * num_train
 
-    # Saves the metadata for the current sequence, and load it to the JSON file
-    def save_current_sequence(self):
+    # Delete the temp file holding the last recorded sequence
+    def clear_current_sequence(self):
+        # Delete temporary directory holding recorded frames
+        if os.path.exists(self._temp_dir):
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
+
+    # Adds the information of the previous recording to the total recording information
+    def update_meta_data(self):
         img_idx = self._img_index
 
         # Update current image and total number of sequences
@@ -311,19 +329,18 @@ class RecordGame(Game):
         self._training_meta_data["image time"] = self._curr_img_time
         self._training_meta_data["image frame count"] = self._curr_img_frames
 
-        # Load metadata json object to file
-        training_meta_path = self._training_dir + self._meta_name
-        with open(training_meta_path, 'w') as outfile:  
-            json.dump(self._training_meta_data, outfile, indent=2)
+    # Saves the metadata for the current sequence, and load it to the JSON file
+    def save_current_sequence(self):
+        # Save recording information
+        self.update_meta_data()
 
-    # Sequence is not being saved, delete all files created for current sequence
-    def clear_current_sequence(self):
-        # Loop through each frame for the sequence that was just recorded
-        for filename in self._output_filenames:
-            # Delete JPEG image file
-            os.remove(filename[0])
-            # Delete the JSON image file
-            os.remove(filename[1])
+        # Rename temp directory
+        if os.path.exists(self._temp_dir):
+            os.rename(self._temp_dir, self._training_dir + self._time)
+
+        # Write recorded velocities to file
+        with open("%s%s/velocities.csv" % (self._training_dir, self._time), 'w') as csv_file:  
+            csv.writer(csv_file, delimiter=',').writerows(self._recorded_velocities)
 
     # Saved option has been pressed, either delete or save the recorded sequence
     def save_option_pressed(self, is_saving):
@@ -338,13 +355,12 @@ class RecordGame(Game):
             # Move image to the next training image
             self.load_next_image()
         else:
-            # DO NOT SAVE chosen, delete all JPEG and JSON files
             self.clear_current_sequence()
 
         # Reset all information saved for sequence
         self._frame_count = 0
         self._record_time = 0
-        self._output_filenames = []
+        self._recorded_velocities = []
 
         # Move state of program to 0: NORMAL
         self._recording_state = 0
@@ -363,23 +379,17 @@ class RecordGame(Game):
             # Add 1 to frame count for current sequence recording
             self._frame_count += 1
 
+            # print("frame: %d, max frames: %d" % (self._frame_count, self._max_frames))
+            if self._frame_count == self._max_frames:
+                self.update_recording_state()
+
             # Filenames for current image and velocities being saved
-            frame_code = "%06d-%06d" % (self._tot_seq_count + 1, self._frame_count)
-            frame_filename = "%s_x.jpg" % frame_code
-            frame_path = self._training_dir + frame_filename
-            # Paths appended to file names
-            velocities_filename = "%s_y.json" % frame_code
-            velocities_path = self._training_dir + velocities_filename
+            frame_filename = "%06d.png" % self._frame_count
+            frame_path = self._temp_dir + frame_filename
 
-            # Append the two new filenames to list to be used incase this sequence is not saved
-            self._output_filenames.append([frame_path, velocities_path])
-
-            # Save current frame as jpg image
+            # Save current frame and velocities
             pygame.image.save(self._small_frame, frame_path)
-
-            # Save current velocities as JSON file
-            with open(velocities_path, 'w') as outfile:  
-                json.dump([dx, dy], outfile, indent=2)
+            self._recorded_velocities.append([dx, dy])
 
         # Load the next frame
         self.update_frame(dx, dy)
@@ -488,6 +498,15 @@ class RecordGame(Game):
         Game.on_render(self)
         self.draw_control_panel()
 
+    # Reset directory to store temporary image files
+    def refresh_temp_dir(self):
+        # Delete directory if path exists
+        if os.path.exists(self._temp_dir):
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
+
+        # Create temporary image directory
+        os.makedirs(self._temp_dir)
+
     # Spacebar event, start or stop recording
     def update_recording_state(self):
         # Start recording
@@ -495,6 +514,8 @@ class RecordGame(Game):
             self._record_time = 0
             self._clock = pygame.time.Clock()
             self._recording_state = 1
+            self.refresh_temp_dir()
+            self._time = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
 
         # Stop recording
         elif self._recording_state == 1:
@@ -505,7 +526,8 @@ class RecordGame(Game):
         if event.type == KEYDOWN:
             if event.key == K_SPACE: 
                 # Start or stop recording
-                self.update_recording_state()
+                if not (self._recording_state == 1 and not self._stop_recording):
+                    self.update_recording_state()
             if event.key == K_RETURN:
                 # Load next image if in NORMAL state
                 if self._recording_state == 0:
