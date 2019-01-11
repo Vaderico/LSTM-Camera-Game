@@ -379,7 +379,7 @@ class RecordGame(Game):
             # Add 1 to frame count for current sequence recording
             self._frame_count += 1
 
-            # print("frame: %d, max frames: %d" % (self._frame_count, self._max_frames))
+            # Stop recording when max frames is reached
             if self._frame_count == self._max_frames:
                 self.update_recording_state()
 

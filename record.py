@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import shutil
 
 from utils import query_yes_no

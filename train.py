@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 from train_manager import TrainManager
 
@@ -23,18 +24,17 @@ if __name__ == "__main__" :
     # Argument parsing gets image directory, training data directory, and window size
     parser = argparse.ArgumentParser()
     parser.add_argument("training", help="name of directory to load training data from")
+    parser.add_argument("-i", "--Intermediate", dest="inter", action='store_true', help="Pass the resnet result through an intermediate net before the lstm")
     parser.add_argument("-e", "--epochs", dest="epochs", type=int, default=20, help="number of epochs")
     parser.add_argument("-b", "--batch-size", dest="batch_size", type=int, default=10, help="size of batches")
-    parser.add_argument("-v", "--validation-split", dest="val_split", type=float, default=0.2, help="percentage of data for validation set")
+    parser.add_argument("-s", "--split", dest="split", type=float, default=0.1, help="percentage of data for validation and test set")
     args = parser.parse_args()
 
-    print(args.frame_rate)
 
     # Check validity of image and training data directories/files
     training_dir = check_training_directory(args.training)
 
-    train_manager = TrainManager(training_dir, arg.val_split, args.epochs, args.batch_size)
-    train_manager.convert_data()
+    train_manager = TrainManager(training_dir, args.inter, args.split, args.epochs, args.batch_size)
+    train_manager.load_data()
     train_manager.train_model()
-    train_manager.save_model()
 
