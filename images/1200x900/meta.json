@@ -1,0 +1,16 @@
+{
+  "training_images": [
+    "train_1.jpg",
+    "train_2.jpg",
+    "train_3.jpg",
+    "train_4.jpg",
+    "train_5.jpg",
+    "train_6.jpg",
+    "train_7.jpg",
+    "train_8.jpg"
+  ],
+  "test_images": [
+    "test_1.jpg",
+    "test_2.jpg"
+  ]
+}
