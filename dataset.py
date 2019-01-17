@@ -8,10 +8,10 @@ import os
 import csv
 
 class SequenceDataset(data.Dataset):
-    def __init__(self, sequence_dirs, training_dir, data_transforms):
+    def __init__(self, sequence_dirs, training_dir, transform):
         self._sequence_dirs = sequence_dirs
         self._training_dir = training_dir
-        self._data_transforms = data_transforms
+        self._transform = transform
 
     def __len__(self):
         return len(self._sequence_dirs)
@@ -29,6 +29,7 @@ class SequenceDataset(data.Dataset):
                 continue;
             image_path = os.path.join(seq_path, file_name)
             img = np.array(Image.open(image_path))
+            img = self._transform(img)
             img = np.transpose(img, (2,0,1))
             img = img.reshape((1,3,224,224))
             images = np.concatenate((images, img), axis=0)

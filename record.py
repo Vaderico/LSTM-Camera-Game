@@ -4,9 +4,8 @@ import sys
 import shutil
 
 from utils import query_yes_no
-from game import RecordGame, Game
-from human_player import HumanPlayer
-from lstm_player import LSTMPlayer
+from game import RecordGame
+from player import HumanPlayer 
 
 # Ensures the images directory exists, and its contents is valid
 def check_images_directory(directory):
@@ -32,7 +31,7 @@ def check_training_directory(directory):
         os.makedirs(directory)
         return directory
 
-    # Deletes contents of directory if not empty
+    # ask if you want to add to the contents of directory if not empty
     if len(os.listdir(directory)) > 0:
         query = "Directory: " + directory + " already contains training data, would you like to add to it?"
         if not query_yes_no(query):
@@ -55,17 +54,11 @@ if __name__ == "__main__" :
     parser.add_argument("-x", "--max-frames", dest="max_frames", type=int, default=1000, help="automatically stops recording after given number of frames")
     args = parser.parse_args()
 
-    print(args.frame_rate)
-
     # Check validity of image and training data directories/files
     images_dir = check_images_directory(args.images)
     training_dir = check_training_directory(args.training)
 
     # Create and run progra to record training data
     player = HumanPlayer(args.max_vel, args.accel, args.decel)
-    # player = LSTMPlayer()
-
     game = RecordGame(player, images_dir, training_dir, args.res, args.frame_rate, args.stop, args.max_frames)
-    # game = Game(player, images_dir, args.res, args.frame_rate)
-
     game.on_execute()

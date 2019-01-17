@@ -10,8 +10,7 @@ import datetime
 import time
 import csv
 
-from human_player import HumanPlayer
-from lstm_player import LSTMPlayer
+from player import HumanPlayer, LSTMPlayer
  
 # Game that displays a crop of an image, and allows a player to move
 # around it by supplying velocities in the x and y direction
@@ -76,7 +75,7 @@ class Game:
         # Load metadata json from file
         with open (self._images_dir + self._meta_name) as file:
             self._meta_data = json.load(file)
-        self._all_images = self._meta_data["test_images"]
+        self._all_images = self._meta_data["training_images"]
 
         # Create the pygame window with the correct dimensions
         self._display_surf = pygame.display.set_mode((self._res, self._scr_height), 
@@ -95,8 +94,8 @@ class Game:
 
     # Load the image and crop a frame for display
     def load_image(self):
-        # Stop the momentum of the player
-        self._player.reset_velocities()
+        # Reset state of player
+        self._player.reset()
         # Gets the path of the current image and load it
         image_path = self._images_dir + self._all_images[self._img_index]
         self._full_image = pygame.image.load(image_path)
