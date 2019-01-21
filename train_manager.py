@@ -18,20 +18,39 @@ from dataset import SequenceDataset
 from model import LSTMController
 from utils import memReport, cpuStats
 
+class LSTMStepLearner(nn.Module):
+    def __init__(self, input_dim, hidden_dim, sequence_size):
+        super(LSTMStepLearner, self).__init__()
+
+        self.hidden_dim = hidden_dim
+        self.lstm = nn.LSTM(input_dim, hidden_dim)
+        self.hiddenToVel = nn.Linear(hidden_dim, 2)
+        self.init_hidden()
+    
+    def init_hidden(self):
+        self.hidden = (torch.zeros(1, 1, self.hidden_dim).cuda(),
+                       torch.zeros(1, 1, self.hidden_dim).cuda())
+    
+    def forward(self, X):
+        X = X.reshape(len(X),1,-1)
+        lstm_out, self.hidden = self.lstm(X, self.hidden)
+        vel_space = self.hiddenToVel(lstm_out.view(len(X), -1))
+        return vel_space
+
 class TrainManager():
-    def __init__(self, training_dir, models_dir, intermediate, split, epochs, batch_size):
+    def __init__(self, training_dir=None, models_dir=None, split=None, epochs=None, batch_size=None):
+        if training_dir is None:
+            pass
+
         self._training_dir = training_dir
         self._models_dir = models_dir
-        self._intermediate = intermediate
         self._split = split
         self._epochs = epochs
         self._batch_size = batch_size
 
-        self._device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         torch.backends.cudnn.benchmark = True
 
-        self._model = LSTMController(2000, self._intermediate, self._device)
-        self._model = self._model.to(self._device)
+        self._model = LSTMController().cuda()
 
         self._dataloaders = {}
         self._dataset_sizes = {}
@@ -48,10 +67,8 @@ class TrainManager():
         partition = {'train': sequence_dirs[threshold:],
                      'val': sequence_dirs[:threshold]}
 
-        # mean, std = self.mean_and_std();
         data_transforms = transforms.Compose([
             transforms.ToTensor(),
-            # transforms.Normalize(mean, std)
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) 
         ])
 
@@ -86,89 +103,75 @@ class TrainManager():
         return dataset_mean / count, dataset_std / count
         
     def train_model(self):
-        criterion = nn.MSELoss()
-        lr=0.1
-        optimizer = optim.Adam(self._model.parameters(), lr=0.001)
-        # Decay LR by a factor of 0.1 every 7 epochs
-        scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.01)
+        self._criterion = nn.MSELoss()
+        optimizer = optim.Adam(self._model.parameters(), lr=0.0001)
 
         since = time.time()
-
-        best_model_wts = copy.deepcopy(self._model.state_dict())
         best_loss = float('inf')
 
         train_loss_list = []
         val_loss_list = []
 
+        self._seq_len = 100
+
         for epoch in range(self._epochs):
-            print('Epoch {}/{}'.format(epoch, self._epochs - 1))
-            print('-' * 10)
+            # Set model to training mode
+            self._model.train()  
 
-            train_epoch_loss = 0.0
-            val_epoch_loss = 0.0
+            # Iterate over data.
+            for i, (X, y) in enumerate(self._dataloaders['train']):
+                # X = torch.randn(self._seq_len, 20).cuda()
+                # y = torch.tensor(self.generate_step_tensor(self._seq_len, 10)).float().cuda()
 
-            # Each epoch has a training and validation phase
-            for phase in self._partition_names:
-                if phase == 'train':
-                    scheduler.step()
-                    self._model.train()  # Set model to training mode
-                else:
-                    self._model.eval()   # Set model to evaluate mode
-
-                # Iterate over data.
                 optimizer.zero_grad()
-                loss_mini_batch = 0
-                for i, (X, target) in enumerate(self._dataloaders[phase]):
-                    X = X.to(self._device)
-                    target = target.to(self._device)
-                    self._model.init_hidden()
-                                
-                    # track history if only in train
-                    with torch.set_grad_enabled(phase == 'train'):
-                        X = torch.squeeze(X)
-                        predictions = self._model(X)
-                        loss = criterion(predictions, torch.squeeze(target))
-                        loss /= self._batch_size
+                self._model.init_hidden()
+                            
+                X = torch.squeeze(X.cuda())
+                predict = self._model(X)
 
-                        # statistics
-                        loss_mini_batch += loss.item()
+                loss = self._criterion(predict, y.cuda())
+                self._model.train()  
+                loss.backward(retain_graph=True)
+                optimizer.step()
 
-                        # backward + optimize only if in training phase
-                        if phase == 'train':
-                            loss.backward(retain_graph=True)
-                            torch.nn.utils.clip_grad_norm_(self._model.parameters(), 0.5)
-                            if (i + 1) % self._batch_size == 0:
-                                loss_mini_batch /= self._batch_size
-                                train_epoch_loss += loss_mini_batch
-                                optimizer.step()
-                                optimizer.zero_grad()
-                                print('batch loss: %0.4f' % loss_mini_batch)
-                                loss_mini_batch = 0.0
-                        else:
-                            val_epoch_loss += loss.item()
+                print("[Epoch: %d/%d, Sample: %d] loss: %0.4f " % (
+                    epoch + 1, self._epochs, i, loss.item()), end='\r', flush=True)
 
-                # deep copy the model
-                if phase == 'val' and val_epoch_loss < best_loss:
-                    best_loss = val_epoch_loss
-                    best_model_wts = copy.deepcopy(self._model.state_dict())
-                    torch.save(self._model, os.path.join(self._models_dir, "model.pt"))
-
-            # print the loss for the epoch
-            train_epoch_loss /= (self._dataset_sizes['train'] / self._batch_size)
-            val_epoch_loss /= self._dataset_sizes['val']
+            # print training and validation loss
+            train_loss = self.test('train')
+            val_loss = self.test('val')
+            print('Epoch: %d, train loss: %0.4f, validation loss: %0.4f' % (epoch + 1, train_loss, val_loss))
+                   
 
             # plot training and validation loss
-            train_loss_list.append(train_epoch_loss)
-            val_loss_list.append(val_epoch_loss)
+            train_loss_list.append(train_loss)
+            val_loss_list.append(val_loss)
             self.plot_loss(train_loss_list, val_loss_list)
 
-            print('{} loss: {:.4f}, {} loss: {:.4f}'.format(
-                'train', train_epoch_loss,'validation', val_epoch_loss)) 
-            print()
+            # save this model if it has the lowest validation loss
+            if val_loss < best_loss:
+                best_loss = val_loss
+                torch.save(self._model, os.path.join(self._models_dir, "model.pt"))
 
+        # print total time taken to train
         time_elapsed = time.time() - since
-        print('Training complete in {:.0f}m {:.0f}s'.format(
-            time_elapsed // 60, time_elapsed % 60))
+        print('Training complete in %0.0fm %0.0fs' % (time_elapsed / 60, time_elapsed % 60))
+
+    def test(self, phase):
+        loss = 0.0
+        with torch.no_grad():
+            for X, y in self._dataloaders[phase]:
+            # for i in range(200):
+                # X = torch.randn(self._seq_len, 20).cuda()
+                # y = torch.tensor(self.generate_step_tensor(self._seq_len, 10)).float().cuda()
+
+                X = torch.squeeze(X).cuda()
+                self._model.init_hidden()
+                predict = self._model(X)
+                loss += self._criterion(predict, y.cuda()).item()
+
+        return loss / self._dataset_sizes[phase]
+
 
     def plot_loss(self, train_loss_list, val_loss_list):
         plt.cla()
@@ -182,4 +185,20 @@ class TrainManager():
         plt.pause(0.1)
         plt.savefig(os.path.join(self._models_dir, "plot"))
 
+    def generate_step_tensor(self, seq_length, step_size):
+        step_tensor = np.array([], dtype=np.float64).reshape(0, 2)
+        small = True
+        for i in range(seq_length):
+            if i % step_size is 0:
+                small = not small
+            if small:
+                step_tensor = np.concatenate((step_tensor, np.array([[6, 0]])))
+            else:
+                step_tensor = np.concatenate((step_tensor, np.array([[0, 6]])))
+        return step_tensor
+
+# Main function
+if __name__ == "__main__" :
+    trainer = TrainManager()
+    trainer.train_model()
 

@@ -31,7 +31,7 @@ class Player:
     def handle_event(self, event):
         pass
 
-    def reset(self);
+    def reset(self):
         pass
 
 # Player controlled by user to manually move the camera in game
@@ -39,10 +39,10 @@ class LSTMPlayer(Player):
     def __init__(self, model_path):
         Player.__init__(self)
         self._model = torch.load(model_path)
-        self._model.eval()
 
-        self._device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self._model.init_hidden()
+
+        self._frame_count = 1
 
         self._transform = transforms.Compose([
             transforms.ToTensor(),
@@ -50,7 +50,9 @@ class LSTMPlayer(Player):
         ])
 
     def reset(self):
-        Player.reset_velocities(self)
+        self._model.init_hidden()
+        self.reset_velocities()
+        self._frame_count = 1
 
     # Updates the x and y velocity for the next time step
     def step_velocity(self, frame):
@@ -58,14 +60,17 @@ class LSTMPlayer(Player):
         img_pil = Image.frombytes("RGB",(224,224), img_string)
 
         img = np.array(img_pil)
-        X = torch.tensor(self._transform(img), device=self._device)
+        X = torch.tensor(self._transform(img)).cuda()
         X = X.view((1,3,224,224))
 
-        test = torch.tensor([1,2,3,4], device="cuda:0");
+        with torch.no_grad():
+            vel = self._model(X)[0]
 
-        vel = self._model(X)[0]
-        self._x_vel = vel[1]
-        self._x_vel = vel[0]
+        self._x_vel = vel[0].item()
+        self._y_vel = vel[1].item()
+
+        print("%0.4f, %0.4f, frame: %d" % (self._x_vel, self._y_vel, self._frame_count))
+        self._frame_count += 1
 
         return self._x_vel, self._y_vel
 
