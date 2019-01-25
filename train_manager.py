@@ -8,7 +8,6 @@ from torchvision import datasets, models, transforms
 
 import numpy as np
 import matplotlib.pyplot as plt
-import cv2
 import os
 import random
 import time
@@ -17,25 +16,6 @@ import copy
 from dataset import SequenceDataset
 from model import LSTMController
 from utils import memReport, cpuStats
-
-class LSTMStepLearner(nn.Module):
-    def __init__(self, input_dim, hidden_dim, sequence_size):
-        super(LSTMStepLearner, self).__init__()
-
-        self.hidden_dim = hidden_dim
-        self.lstm = nn.LSTM(input_dim, hidden_dim)
-        self.hiddenToVel = nn.Linear(hidden_dim, 2)
-        self.init_hidden()
-    
-    def init_hidden(self):
-        self.hidden = (torch.zeros(1, 1, self.hidden_dim).cuda(),
-                       torch.zeros(1, 1, self.hidden_dim).cuda())
-    
-    def forward(self, X):
-        X = X.reshape(len(X),1,-1)
-        lstm_out, self.hidden = self.lstm(X, self.hidden)
-        vel_space = self.hiddenToVel(lstm_out.view(len(X), -1))
-        return vel_space
 
 class TrainManager():
     def __init__(self, training_dir=None, models_dir=None, split=None, epochs=None, batch_size=None):
@@ -50,7 +30,14 @@ class TrainManager():
 
         torch.backends.cudnn.benchmark = True
 
-        self._model = LSTMController().cuda()
+        self._num_workers = 8
+        self._lr = 0.0001
+        self._hidden_dim = 500
+        self._middle_out_dim = 100
+        self._avg_pool = True
+        self._plot_title = "h: %d, lr: %f, mid: %d, avgpl: %r" % (
+                self._hidden_dim, self._lr, self._middle_out_dim, self._avg_pool)
+        self._model = LSTMController(self._hidden_dim, self._middle_out_dim).cuda()
 
         self._dataloaders = {}
         self._dataset_sizes = {}
@@ -61,6 +48,8 @@ class TrainManager():
         sequence_dirs = os.listdir(self._training_dir)
         if 'temp' in sequence_dirs:
             sequence_dirs.remove('temp')
+        if 'pt' in sequence_dirs:
+            sequence_dirs.remove('pt')
 
         random.shuffle(sequence_dirs)
         threshold = int(len(sequence_dirs) * self._split)
@@ -76,35 +65,13 @@ class TrainManager():
                 for x in self._partition_names}
 
         self._dataloaders = {x: DataLoader(image_datasets[x], batch_size=1, shuffle=True,
-                                num_workers=1) for x in self._partition_names}
+                                num_workers=self._num_workers) for x in self._partition_names}
 
         self._dataset_sizes = {x: len(image_datasets[x]) for x in self._partition_names}
 
-    def mean_and_std(self):
-        print("calculating mean and std dev...")
-        dataset_mean = [0.0, 0.0, 0.0]
-        dataset_std = [0.0, 0.0, 0.0]
-        count = 0
-
-        for sequence in os.listdir(self._training_dir):
-            seq_path = os.path.join(self._training_dir, sequence)
-            for file_name in os.listdir(seq_path):
-                if not file_name.endswith('.png'):
-                    continue;
-                count += 1
-
-                image_path = os.path.join(seq_path, file_name)
-                img = cv2.imread(image_path)
-                mean, std = cv2.meanStdDev(img)
-
-                dataset_mean += (np.transpose(mean)[0] / 255)
-                dataset_std += (np.transpose(std)[0] / 255)
-                
-        return dataset_mean / count, dataset_std / count
-        
     def train_model(self):
         self._criterion = nn.MSELoss()
-        optimizer = optim.Adam(self._model.parameters(), lr=0.0001)
+        optimizer = optim.Adam(self._model.parameters(), lr=self._lr)
 
         since = time.time()
         best_loss = float('inf')
@@ -112,35 +79,33 @@ class TrainManager():
         train_loss_list = []
         val_loss_list = []
 
-        self._seq_len = 100
-
         for epoch in range(self._epochs):
-            # Set model to training mode
+           # Set model to training mode
             self._model.train()  
+            t = time.time() - since
 
             # Iterate over data.
             for i, (X, y) in enumerate(self._dataloaders['train']):
-                # X = torch.randn(self._seq_len, 20).cuda()
-                # y = torch.tensor(self.generate_step_tensor(self._seq_len, 10)).float().cuda()
-
+                # X = torch.randn([100, self._middle_out_dim])
                 optimizer.zero_grad()
                 self._model.init_hidden()
                             
                 X = torch.squeeze(X.cuda())
-                predict = self._model(X)
+                predict = self._model(X.cuda())
 
                 loss = self._criterion(predict, y.cuda())
                 self._model.train()  
                 loss.backward(retain_graph=True)
                 optimizer.step()
 
-                print("[Epoch: %d/%d, Sample: %d] loss: %0.4f " % (
-                    epoch + 1, self._epochs, i, loss.item()), end='\r', flush=True)
+                print("[Epoch: %d/%d, Sample: %d] loss: %0.4f, time: %s      " % (
+                    epoch + 1, self._epochs, i + 1, loss.item(), self.get_time(time.time() - since)), 
+                    end='\r', flush=True)
 
             # print training and validation loss
-            train_loss = self.test('train')
-            val_loss = self.test('val')
-            print('Epoch: %d, train loss: %0.4f, validation loss: %0.4f' % (epoch + 1, train_loss, val_loss))
+            train_loss = self.test('train', since)
+            val_loss = self.test('val', since)
+            print('Epoch: %d, train loss: %0.4f, val loss: %0.4f' % (epoch + 1, train_loss, val_loss))
                    
 
             # plot training and validation loss
@@ -154,21 +119,22 @@ class TrainManager():
                 torch.save(self._model, os.path.join(self._models_dir, "model.pt"))
 
         # print total time taken to train
-        time_elapsed = time.time() - since
-        print('Training complete in %0.0fm %0.0fs' % (time_elapsed / 60, time_elapsed % 60))
+        print('Training complete in %s     ' % self.get_time(time.time() - since))
 
-    def test(self, phase):
+    def test(self, phase, since):
         loss = 0.0
+        self._model.eval()  
         with torch.no_grad():
-            for X, y in self._dataloaders[phase]:
-            # for i in range(200):
-                # X = torch.randn(self._seq_len, 20).cuda()
-                # y = torch.tensor(self.generate_step_tensor(self._seq_len, 10)).float().cuda()
-
+            for i, (X, y) in enumerate(self._dataloaders[phase]):
                 X = torch.squeeze(X).cuda()
+                # X = torch.randn([100, self._middle_out_dim])
                 self._model.init_hidden()
-                predict = self._model(X)
+                predict = self._model(X.cuda())
                 loss += self._criterion(predict, y.cuda()).item()
+
+                print('Calculating %s loss: %0.1f%%, time: %s%s' % (phase, 
+                    ((i + 1) / self._dataset_sizes[phase]) * 100, self.get_time(time.time() - since), 
+                    ' ' * 20), end='\r', flush=True)
 
         return loss / self._dataset_sizes[phase]
 
@@ -178,27 +144,16 @@ class TrainManager():
         plt.plot(train_loss_list, color="blue", label="Training Loss")
         plt.plot(val_loss_list, color="green", dashes=[6,2], label="Validation Loss")
         plt.legend(loc="best")
-        plt.title("Training and Validation Loss vs Epochs")
+        # plt.title("100h Training and Validation Loss vs Epochs")
+        plt.title(self._plot_title)
         plt.ylabel("Loss")
         plt.xlabel("Epochs")
         plt.draw()
         plt.pause(0.1)
         plt.savefig(os.path.join(self._models_dir, "plot"))
 
-    def generate_step_tensor(self, seq_length, step_size):
-        step_tensor = np.array([], dtype=np.float64).reshape(0, 2)
-        small = True
-        for i in range(seq_length):
-            if i % step_size is 0:
-                small = not small
-            if small:
-                step_tensor = np.concatenate((step_tensor, np.array([[6, 0]])))
-            else:
-                step_tensor = np.concatenate((step_tensor, np.array([[0, 6]])))
-        return step_tensor
+    def get_time(self, t):
+        return '%0.2d:%0.2d:%0.2d' % (t // 3600, (t % 3600) // 60, ((t % 3600) % 60))
 
-# Main function
-if __name__ == "__main__" :
-    trainer = TrainManager()
-    trainer.train_model()
+
 
