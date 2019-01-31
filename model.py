@@ -33,10 +33,10 @@ class LSTMController(nn.Module):
                        torch.zeros(1, 1, self.hidden_dim).cuda())
 
     def forward(self, X):
-        # with torch.no_grad():
-            # X = self.res18_model(X.float())
+        with torch.no_grad():
+            X = self.res18_model(X.float())
 
-        # X = self.middle(X.view(len(X), -1))
+        X = self.middle(X.view(len(X), -1))
 
         lstm_out, self.hidden = self.lstm(X.reshape(len(X), 1, -1), self.hidden)
 
@@ -45,6 +45,7 @@ class LSTMController(nn.Module):
         return vel_space
 
 if __name__ == "__main__" :
-    lstm = LSTMController().cuda()
+    print(models.__file__)
+    lstm = LSTMController(500,500).cuda()
     lstm(torch.randn((100,3,244,244)).cuda())
 

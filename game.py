@@ -106,6 +106,16 @@ class Game:
         # Choose a random starting position for the frame
         self._x_pos = random.randint(0, self._full_width - self._frame_size)
         self._y_pos = random.randint(0, self._full_height - self._frame_size)
+        # choose = random.randint(0,3)
+        # offset = random.randint(0,9)
+        # if choose is 0:
+            # self._x_pos = 0 + offset
+        # elif choose is 1:
+            # self._x_pos = self._full_width - self._frame_size - offset
+        # elif choose is 2:
+            # self._y_pos = 0 + offset
+        # elif choose is 3:
+            # self._y_pos = self._full_height - self._frame_size - offset
 
         # Crops and loads the new frame
         self.update_frame(0, 0)

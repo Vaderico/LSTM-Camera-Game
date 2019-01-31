@@ -18,27 +18,22 @@ from model import LSTMController
 from utils import memReport, cpuStats
 
 class TrainManager():
-    def __init__(self, training_dir=None, models_dir=None, split=None, epochs=None, batch_size=None):
-        if training_dir is None:
-            pass
-
+    def __init__(self, training_dir=None, models_dir=None, split=None, epochs=None):
         self._training_dir = training_dir
         self._models_dir = models_dir
         self._split = split
         self._epochs = epochs
-        self._batch_size = batch_size
-
-        torch.backends.cudnn.benchmark = True
 
         self._num_workers = 8
         self._lr = 0.0001
         self._hidden_dim = 500
-        self._middle_out_dim = 100
-        self._avg_pool = True
+        self._middle_out_dim = 500
+        self._avg_pool = False
+
         self._plot_title = "h: %d, lr: %f, mid: %d, avgpl: %r" % (
                 self._hidden_dim, self._lr, self._middle_out_dim, self._avg_pool)
-        self._model = LSTMController(self._hidden_dim, self._middle_out_dim).cuda()
 
+        self._model = LSTMController(self._hidden_dim, self._middle_out_dim).cuda()
         self._dataloaders = {}
         self._dataset_sizes = {}
         self._partition_names = ['train', 'val']
@@ -63,11 +58,15 @@ class TrainManager():
 
         image_datasets = {x: SequenceDataset(partition[x], self._training_dir, data_transforms) 
                 for x in self._partition_names}
+        # image_datasets = {'train': SequenceDataset(partition['train'], self._training_dir, data_transforms)}
 
         self._dataloaders = {x: DataLoader(image_datasets[x], batch_size=1, shuffle=True,
                                 num_workers=self._num_workers) for x in self._partition_names}
+        # self._dataloaders = {'train': DataLoader(image_datasets['train'], batch_size=1, shuffle=True,
+                                # num_workers=self._num_workers)}
 
         self._dataset_sizes = {x: len(image_datasets[x]) for x in self._partition_names}
+        # self._dataset_sizes = {'train': len(image_datasets['train'])}
 
     def train_model(self):
         self._criterion = nn.MSELoss()
@@ -79,14 +78,17 @@ class TrainManager():
         train_loss_list = []
         val_loss_list = []
 
+        # X, y = next(iter(self._dataloaders['train']))
+
         for epoch in range(self._epochs):
            # Set model to training mode
             self._model.train()  
             t = time.time() - since
 
             # Iterate over data.
+            # i = 0
+            # if True:
             for i, (X, y) in enumerate(self._dataloaders['train']):
-                # X = torch.randn([100, self._middle_out_dim])
                 optimizer.zero_grad()
                 self._model.init_hidden()
                             
@@ -105,6 +107,7 @@ class TrainManager():
             # print training and validation loss
             train_loss = self.test('train', since)
             val_loss = self.test('val', since)
+            # val_loss = self.test('val', since)
             print('Epoch: %d, train loss: %0.4f, val loss: %0.4f' % (epoch + 1, train_loss, val_loss))
                    
 
@@ -127,7 +130,6 @@ class TrainManager():
         with torch.no_grad():
             for i, (X, y) in enumerate(self._dataloaders[phase]):
                 X = torch.squeeze(X).cuda()
-                # X = torch.randn([100, self._middle_out_dim])
                 self._model.init_hidden()
                 predict = self._model(X.cuda())
                 loss += self._criterion(predict, y.cuda()).item()
@@ -144,7 +146,6 @@ class TrainManager():
         plt.plot(train_loss_list, color="blue", label="Training Loss")
         plt.plot(val_loss_list, color="green", dashes=[6,2], label="Validation Loss")
         plt.legend(loc="best")
-        # plt.title("100h Training and Validation Loss vs Epochs")
         plt.title(self._plot_title)
         plt.ylabel("Loss")
         plt.xlabel("Epochs")
@@ -154,6 +155,4 @@ class TrainManager():
 
     def get_time(self, t):
         return '%0.2d:%0.2d:%0.2d' % (t // 3600, (t % 3600) // 60, ((t % 3600) % 60))
-
-
 

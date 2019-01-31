@@ -56,14 +56,14 @@ class LSTMPlayer(Player):
 
     # Updates the x and y velocity for the next time step
     def step_velocity(self, frame):
-        # img_string = pygame.image.tostring(frame, "RGB", False)
-        # img_pil = Image.frombytes("RGB",(224,224), img_string)
+        img_string = pygame.image.tostring(frame, "RGB", False)
+        img_pil = Image.frombytes("RGB",(224,224), img_string)
 
-        # img = np.array(img_pil)
-        # X = torch.tensor(self._transform(img)).cuda()
-        # X = X.view((1,3,224,224))
+        img = np.array(img_pil)
+        X = torch.tensor(self._transform(img)).cuda()
+        X = X.view((1,3,224,224))
 
-        X = torch.rand([1,500]).float().cuda()
+        # X = torch.rand([1,500]).float().cuda()
 
         with torch.no_grad():
             vel = self._model(X)[0]

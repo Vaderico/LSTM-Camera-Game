@@ -45,7 +45,6 @@ if __name__ == "__main__" :
     parser.add_argument("training", help="name of directory to load training data from")
     parser.add_argument("models", help="name of directory to save model into")
     parser.add_argument("-e", "--epochs", dest="epochs", type=int, default=20, help="number of epochs")
-    parser.add_argument("-b", "--batch-size", dest="batch_size", type=int, default=1, help="size of batches")
     parser.add_argument("-s", "--split", dest="split", type=float, default=0.2, help="percentage of data for validation and test set")
     args = parser.parse_args()
 
@@ -55,7 +54,7 @@ if __name__ == "__main__" :
     models_dir = check_models_directory(args.models)
 
     # Create trainer, load the data, and train the model
-    train_manager = TrainManager(training_dir, models_dir, args.split, args.epochs, args.batch_size)
+    train_manager = TrainManager(training_dir, models_dir, args.split, args.epochs)
     train_manager.load_data()
     train_manager.train_model()
 
