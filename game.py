@@ -75,7 +75,7 @@ class Game:
         # Load metadata json from file
         with open (self._images_dir + self._meta_name) as file:
             self._meta_data = json.load(file)
-        self._all_images = self._meta_data["training_images"]
+        self._all_images = self._meta_data["test_images"]
 
         # Create the pygame window with the correct dimensions
         self._display_surf = pygame.display.set_mode((self._res, self._scr_height), 

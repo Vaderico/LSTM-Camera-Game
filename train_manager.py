@@ -24,7 +24,7 @@ class TrainManager():
         self._split = split
         self._epochs = epochs
 
-        self._num_workers = 8
+        self._num_workers = 3
         self._lr = 0.0001
         self._hidden_dim = 500
         self._middle_out_dim = 500
@@ -78,16 +78,12 @@ class TrainManager():
         train_loss_list = []
         val_loss_list = []
 
-        # X, y = next(iter(self._dataloaders['train']))
-
         for epoch in range(self._epochs):
            # Set model to training mode
             self._model.train()  
             t = time.time() - since
 
             # Iterate over data.
-            # i = 0
-            # if True:
             for i, (X, y) in enumerate(self._dataloaders['train']):
                 optimizer.zero_grad()
                 self._model.init_hidden()
@@ -107,7 +103,6 @@ class TrainManager():
             # print training and validation loss
             train_loss = self.test('train', since)
             val_loss = self.test('val', since)
-            # val_loss = self.test('val', since)
             print('Epoch: %d, train loss: %0.4f, val loss: %0.4f' % (epoch + 1, train_loss, val_loss))
                    
 
